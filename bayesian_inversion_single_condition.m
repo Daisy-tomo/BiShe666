@@ -376,74 +376,90 @@ try
     end
 
     %% ----------------------------------------------------------------
-    % (6) 热恢复系数 lambda_heat（即图中 λ(pi_k, T_g)）
+    % (6) 热恢复系数 lambda_heat（即图中 λ(π_к', T_г')）
     %
-    %   公式（按图片最接近的数学结构实现）：
+    % 严格按图片公式实现（第4张图）：
     %
-    %   num_L = 1 - [k/(k-1)*R_B*(pi_k^((k-1)/k)-1)] / [kT/(kT-1)*RT*T_g*eta_k*eta_T]
+    %              1 - W_c / (H_g · η_к)
+    %   λ = ─────────────────────────────────────────
+    %              1 - W_c / (H_g · η_к · η_т · η_г)
     %
-    %   （注：图中分子分母各含一项；
-    %    分子用空气参数 k_air, R_air, T_B；
-    %    分母用燃气参数 kT, RT；
-    %    以下严格按分子/分母两层嵌套实现）
+    % 其中：
+    %   W_c = k/(k-1) · R · T_В · (π_к^((k-1)/k) - 1)   [压气机压缩功参数]
+    %   H_g = k_T/(k_T-1) · R_T · T_г                    [燃气焓参数]
+    %   η_к  → eta_k  （压气机效率）
+    %   η_т  → eta_t  （涡轮效率）
+    %   η_г  → eta_T  （燃烧放热系数）
     %
-    %   lambda = num_lambda / den_lambda
-    %   其中 den_lambda 与 num_lambda 公式结构一致，但 eta_T 换为 eta_T*eta_t
+    % 注意：分子分母仅有 η_к，分母有 η_к · η_т · η_г，两者不同。
 
-    % 公用项：k/(k-1)*R_B*(pi_k^((k-1)/k)-1)  —— 压气机压缩功有关项
-    compress_work = (k_air/(k_air-1)) * R_air * T_B * (pi_k_ratio - 1);
+    % W_c：压气机压缩功参数
+    W_c = (k_air / (k_air - 1)) * R_air * T_B * (pi_k_ratio - 1);
 
-    % 燃气膨胀做功相关系数（分母中分子）
-    % kT/(kT-1)*RT*T_g  —— 表征燃气总焓
-    gas_enthalpy = (kT/(kT-1)) * RT * T_g;
-    if abs(gas_enthalpy) < 1e-6, return; end
+    % H_g：燃气焓参数  kT/(kT-1) · R_T · T_g
+    H_g = (kT / (kT - 1)) * RT * T_g;
+    if abs(H_g) < 1e-6, return; end
 
-    % lambda 分子（不含 eta_t）
-    num_lambda = 1 - compress_work / (gas_enthalpy * eta_k * eta_T);
-    % lambda 分母（含 eta_t，即有效膨胀）
-    den_lambda = 1 - compress_work / (gas_enthalpy * eta_k * eta_T * eta_t);
+    % λ 分子：1 - W_c / (H_g · η_к)
+    %   ——分子分母只含 eta_k，不含 eta_t、eta_T
+    num_lambda = 1 - W_c / (H_g * eta_k);
+
+    % λ 分母：1 - W_c / (H_g · η_к · η_т · η_г)
+    %   ——分母分母含 eta_k · eta_t · eta_T（三个效率都在此处）
+    den_lambda = 1 - W_c / (H_g * eta_k * eta_t * eta_T);
 
     if abs(den_lambda) < 1e-10, return; end
     lambda_heat = num_lambda / den_lambda;
     if ~isfinite(lambda_heat), return; end
 
     %% ----------------------------------------------------------------
-    % (7) 进口总压恢复系数 sigma_bx
+    % (7) 进口总压恢复系数 σ_вх
+    %   σ_вх = σ_сс · σ_кан
     sigma_bx = sigma_cc * sigma_kan;
 
     %% ----------------------------------------------------------------
-    % (8) 单位自由能 L_sv（即图中 L_cb(pi_k, T_g)）
+    % (8) 单位自由能 L_св（即图中 L_св(π_к', T_г')）
     %
-    %   L_sv = lambda_heat * [kT/(kT-1)*RT*T_g *
-    %          (1 - (1/(tau_v*sigma_bx*pi_k*sigma_kask*sigma_ks))^((kT-1)/kT))]
-    %        - k/(k-1)*R_air*T_B*(pi_k^((k-1)/k)-1)
-    %          * 1/((1+g_T)*eta_k*eta_t*eta_m*(1-delta))
+    % 严格按图片公式（第5张图）实现：
     %
-    %   此处按图片最接近的数学结构实现
-    %   （注：L_sv 第一项为燃气膨胀做功，第二项为压气机消耗功的修正项）
+    %   L_св = λ · [k_T/(k_T-1) · R_T · T_г · (1 - (1/Π)^((k_T-1)/k_T))]
+    %        - k/(k-1) · R · T_В · (π_к^((k-1)/k) - 1)
+    %          · 1 / [(1 + g_T) · η_к · η_т · η_М · (1 - δ)]
+    %
+    % 其中：
+    %   Π = τ_v · σ_вх · π_к · σ_каск · σ_кс   [膨胀端总压比乘积]
+    %   第一项：燃气膨胀可用功（由 λ 修正）
+    %   第二项：驱动压气机消耗的功（除以效率链）
+    %   第二项分母含 η_к · η_т · η_М（注意：此处是 η_т 涡轮效率，不是 η_г）
 
-    % 膨胀压比的指数
-    exp_T = (kT - 1) / kT;
+    % 膨胀端总压比乘积 Π = τ_v · σ_вх · π_к · σ_каск · σ_кс
+    Pi_exp = tau_v * sigma_bx * pi_k * sigma_kask * sigma_ks;
+    if Pi_exp <= 0, return; end
 
-    % 膨胀压比 = 1/(tau_v * sigma_bx * pi_k * sigma_kask * sigma_ks)
-    expansion_pr_denom = tau_v * sigma_bx * pi_k * sigma_kask * sigma_ks;
-    if expansion_pr_denom <= 0, return; end
-    expansion_term = (1.0 / expansion_pr_denom)^exp_T;
+    % 膨胀指数 (k_T - 1)/k_T
+    exp_kT = (kT - 1) / kT;
+
+    % 膨胀项 (1/Π)^((k_T-1)/k_T)
+    expansion_term = (1.0 / Pi_exp)^exp_kT;
     if ~isfinite(expansion_term), return; end
 
-    % L_sv 第一项（燃气膨胀可用功）
-    term1 = lambda_heat * gas_enthalpy * (1 - expansion_term);
+    % 第一项：λ · H_g · (1 - expansion_term)
+    %   = λ · k_T/(k_T-1) · R_T · T_г · (1 - (1/Π)^((k_T-1)/k_T))
+    Lsv_term1 = lambda_heat * H_g * (1 - expansion_term);
 
-    % L_sv 第二项分母
-    denom2 = (1 + g_T) * eta_k * eta_t * eta_m * (1 - d);
-    if abs(denom2) < 1e-10, return; end
+    % 第二项分母：(1 + g_T) · η_к · η_т · η_М · (1 - δ)
+    %   注：此处为 eta_t（涡轮效率），与 lambda 分母的 eta_t 相同
+    Lsv_denom2 = (1 + g_T) * eta_k * eta_t * eta_m * (1 - d);
+    if abs(Lsv_denom2) < 1e-10, return; end
 
-    % L_sv 第二项（压气机消耗功）
-    term2 = compress_work / denom2;
+    % 第二项：W_c / Lsv_denom2
+    %   = k/(k-1) · R · T_В · (π_к^((k-1)/k)-1) / [(1+g_T)·η_к·η_т·η_М·(1-δ)]
+    Lsv_term2 = W_c / Lsv_denom2;
 
-    L_sv = term1 - term2;
+    % L_св = 第一项 - 第二项
+    L_sv = Lsv_term1 - Lsv_term2;
     if ~isfinite(L_sv) || L_sv <= 0
-        % L_sv 须为正（否则无推力意义）
+        % L_sv 须为正（有效自由能为正才能产生推力）
         return;
     end
 
