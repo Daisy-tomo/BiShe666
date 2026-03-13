@@ -229,8 +229,7 @@ fprintf('\n');
 %% =========================================================================
 % 第十部分：绘图
 % =========================================================================
-plot_results(results, theta_true, lb, ub, param_names, data, ...
-    R_pred_mean, C_pred_mean, R_pred_map, C_pred_map);
+plot_results(results, theta_true, lb, ub, param_names);
 
 fprintf('所有图形已生成。程序运行完毕。\n');
 
@@ -794,18 +793,14 @@ end
 %% -------------------------------------------------------------------------
 %  绘图函数
 %% -------------------------------------------------------------------------
-function plot_results(results, theta_true, lb, ub, param_names, data, ...
-                      R_pred_mean, C_pred_mean, R_pred_map, C_pred_map)
-% plot_results  生成所有后验分析图形
+function plot_results(results, theta_true, lb, ub, param_names)
+% plot_results  生成后验分析图形（共3张：链轨迹、边缘后验、相关热图）
 
 chain_post = results.chain_post;
 chain_full = results.chain_full;
 n_params   = size(chain_post, 2);
 n_post     = size(chain_post, 1);
 n_full     = size(chain_full, 1);
-
-prior_std = (ub - lb) / sqrt(12);   % 均匀分布标准差
-post_std  = results.theta_std;
 
 %% --- 图1：链轨迹图（全链，含 burn-in）---
 fig1 = figure('Name','链轨迹图','Position',[50 50 1400 900]);
@@ -866,60 +861,12 @@ for i = 1:n_params
     end
 end
 
-%% --- 图4：单工况观测-预测对比图 ---
-fig4 = figure('Name','观测预测对比','Position',[200 50 800 500]);
-
-subplot(1,2,1);
-y_vals  = [data.R_true, data.R_obs, R_pred_mean, R_pred_map];
-x_labels = {'真值', '观测值', '后验均值预测', 'MAP预测'};
-bar(y_vals, 0.5, 'FaceColor', [0.5 0.7 0.9]);
-set(gca, 'XTickLabel', x_labels, 'XTickLabelRotation', 20);
-ylabel('R_{ud} [N·s/kg]');
-title('比推力 R_{ud} 对比');
-% 误差棒（观测值处）
-hold on;
-errorbar(2, data.R_obs, 2*data.sigma_R, 'k.', 'LineWidth', 2);
-grid on;
-
-subplot(1,2,2);
-y_vals2 = [data.C_true, data.C_obs, C_pred_mean, C_pred_map];
-bar(y_vals2, 0.5, 'FaceColor', [0.9 0.6 0.4]);
-set(gca, 'XTickLabel', x_labels, 'XTickLabelRotation', 20);
-ylabel('C_{ud} [kg/(N·h)]');
-title('比油耗 C_{ud} 对比');
-hold on;
-errorbar(2, data.C_obs, 2*data.sigma_C, 'k.', 'LineWidth', 2);
-grid on;
-sgtitle('单工况：观测值 vs 后验预测值（误差棒=2\sigma）');
-
-%% --- 图5：可辨识性指标柱状图 ---
-fig5 = figure('Name','可辨识性指标','Position',[250 50 900 450]);
-ident_ratio = post_std ./ prior_std;
-bar(ident_ratio, 0.6, 'FaceColor', [0.3 0.7 0.5]);
-set(gca, 'XTick', 1:n_params, 'XTickLabel', param_names, ...
-         'XTickLabelRotation', 45, 'FontSize', 8);
-ylabel('后验标准差 / 先验标准差');
-title({'可辨识性指标（后验标准差 / 先验标准差）', ...
-       '比值越小说明后验收缩越明显，参数越可辨识'});
-hold on;
-yline(1.0, 'r--', '无更新（=先验）', 'LineWidth', 1.5);
-yline(0.5, 'g--', '50%收缩', 'LineWidth', 1.5);
-grid on;
-ylim([0, 1.2]);
-% 在柱上标注数值
-for i = 1:n_params
-    text(i, ident_ratio(i)+0.02, sprintf('%.2f', ident_ratio(i)), ...
-        'HorizontalAlignment', 'center', 'FontSize', 7);
-end
-
 %% --- 保存所有图形 ---
 try
     saveas(fig1, 'fig1_trace_plots.png');
     saveas(fig2, 'fig2_marginal_posteriors.png');
     saveas(fig3, 'fig3_correlation_heatmap.png');
-    saveas(fig4, 'fig4_obs_pred_comparison.png');
-    saveas(fig5, 'fig5_identifiability.png');
-    fprintf('图形已保存至当前目录（fig1~fig5）。\n');
+    fprintf('图形已保存至当前目录（fig1~fig3）。\n');
 catch
     fprintf('图形保存失败（可能是无显示环境），但已正常绘制。\n');
 end
