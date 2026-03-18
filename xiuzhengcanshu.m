@@ -110,8 +110,10 @@ opts.proposal_sd = 0.15;  % 标准差（13维z空间，0.15可使烧入后接受
 opts.adapt_start = 0;    % 开始
 opts.adapt_end = 6000;   % 结束（与烧入期对齐，整个烧入期持续自适应）
 opts.adapt_interval = 100;    % 自适应调整间隔
-opts.target_accept_low = 0.18;   % 目标接受率下限
-opts.target_accept_high = 0.35;   % 目标接受率上限
+% 目标接受率：13参数/2观测的欠定问题，有效后验维度≈2，理论最优≈0.44
+% 使用宽松区间 [0.35, 0.65] 而非标准 [0.18, 0.35]
+opts.target_accept_low  = 0.35;
+opts.target_accept_high = 0.65;
 
 fprintf('MCMC 配置：\n');
 fprintf('  总采样步数:%d\n', opts.n_samples);
@@ -176,13 +178,16 @@ n_post     = size(chain_post, 1);
 % --- 1. 接受率检验（使用烧入后接受率，排除自适应阶段的干扰）---
 fprintf('--- 1. 接受率检验 ---\n');
 fprintf('总体接受率(含烧入期): %.3f\n', results.accept_rate);
-if results.accept_rate_post >= 0.18 && results.accept_rate_post <= 0.35
-    accept_status = '正常 [目标区间 0.18~0.35]';
+% 欠定问题（13参数/2观测）有效维度≈2，理论最优接受率≈0.44，使用宽松区间
+accept_lo = opts.target_accept_low;
+accept_hi = opts.target_accept_high;
+if results.accept_rate_post >= accept_lo && results.accept_rate_post <= accept_hi
+    accept_status = sprintf('正常 [目标区间 %.2f~%.2f]', accept_lo, accept_hi);
 else
     accept_status = '异常，建议调整提案标准差';
 end
 fprintf('烧入后接受率:         %.3f  -> %s\n\n', results.accept_rate_post, accept_status);
-ok_accept = (results.accept_rate_post >= 0.18 && results.accept_rate_post <= 0.35);
+ok_accept = (results.accept_rate_post >= accept_lo && results.accept_rate_post <= accept_hi);
 
 % --- 2. 真值95%置信区间覆盖率验证 ---
 fprintf('--- 2. 真值 95%% 置信区间覆盖率验证 ---\n');
@@ -277,7 +282,8 @@ if all_pass
 else
     fprintf('MCMC 算法正确性验证: 存在以下问题\n');
     if ~ok_accept
-        fprintf('  [FAIL] 烧入后接受率 %.3f 不在目标区间 [0.18, 0.35]\n', results.accept_rate_post);
+        fprintf('  [FAIL] 烧入后接受率 %.3f 不在目标区间 [%.2f, %.2f]\n', ...
+            results.accept_rate_post, accept_lo, accept_hi);
     end
     if ~ok_coverage
         fprintf('  [FAIL] 真值覆盖率偏低 (%.1f%% < 80%%)\n', coverage_rate);
