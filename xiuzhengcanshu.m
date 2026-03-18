@@ -104,11 +104,11 @@ fprintf('C_true = %.6f, C_obs = %.6f, sigma_C = %.6f\n', ...
 fprintf('\n');
 
 
-opts.n_samples = 10000;  % 总采样步数
-opts.burn_in = 2000;   % 烧入期步数
-opts.proposal_sd = 0.012;  % 标准差
+opts.n_samples = 30000;  % 总采样步数（增大以提升有效样本量）
+opts.burn_in = 6000;   % 烧入期步数（延长以充分自适应）
+opts.proposal_sd = 0.06;  % 标准差（13维z空间，0.06可使接受率落在目标区间）
 opts.adapt_start = 0;    % 开始
-opts.adapt_end = 2000;   % 结束
+opts.adapt_end = 6000;   % 结束（与烧入期对齐，整个烧入期持续自适应）
 opts.adapt_interval = 100;    % 自适应调整间隔
 opts.target_accept_low = 0.18;   % 目标接受率下限
 opts.target_accept_high = 0.35;   % 目标接受率上限
