@@ -166,6 +166,129 @@ fprintf('后验均值预测相对误差: R_ud=%.3f%%, C_ud=%.3f%%\n', err_mean_R
 fprintf('MAP预测相对误差: R_ud=%.3f%%, C_ud=%.3f%%\n', err_map_R,  err_map_C);
 fprintf('\n');
 
+%% MCMC 算法正确性验证
+fprintf('========== MCMC 算法正确性验证 ==========\n\n');
+
+chain_post = results.chain_post;
+n_post     = size(chain_post, 1);
+
+% --- 1. 接受率检验 ---
+fprintf('--- 1. 接受率检验 ---\n');
+if results.accept_rate >= 0.18 && results.accept_rate <= 0.35
+    accept_status = '正常 [目标区间 0.18~0.35]';
+else
+    accept_status = '异常，建议调整提案标准差';
+end
+fprintf('总体接受率: %.3f  -> %s\n\n', results.accept_rate, accept_status);
+ok_accept = (results.accept_rate >= 0.18 && results.accept_rate <= 0.35);
+
+% --- 2. 真值95%置信区间覆盖率验证 ---
+fprintf('--- 2. 真值 95%% 置信区间覆盖率验证 ---\n');
+fprintf('（合成数据中真值应落在 95%% CI 内）\n');
+covered = zeros(1, n_params);
+for i = 1:n_params
+    ci_lo = results.theta_ci95(i,1);
+    ci_hi = results.theta_ci95(i,2);
+    if theta_true(i) >= ci_lo && theta_true(i) <= ci_hi
+        covered(i) = 1;
+        cov_flag = '[覆盖]';
+    else
+        cov_flag = '[未覆盖]';
+    end
+    fprintf('  %-15s 真值=%.4f  CI95=[%.4f, %.4f]  %s\n', ...
+        param_names{i}, theta_true(i), ci_lo, ci_hi, cov_flag);
+end
+coverage_rate = sum(covered) / n_params * 100;
+fprintf('覆盖率: %d/%d = %.1f%%  (期望约 95%%)\n\n', ...
+    sum(covered), n_params, coverage_rate);
+ok_coverage = (coverage_rate >= 80);
+
+% --- 3. Geweke 收敛诊断 ---
+fprintf('--- 3. Geweke 收敛诊断 ---\n');
+fprintf('（比较链前 10%% 与后 50%% 均值，|Z| < 2 表示收敛）\n');
+n_a = floor(0.1 * n_post);
+n_b = floor(0.5 * n_post);
+chain_a = chain_post(1:n_a, :);
+chain_b = chain_post(end-n_b+1:end, :);
+geweke_pass = true;
+for i = 1:n_params
+    mu_a  = mean(chain_a(:,i));
+    mu_b  = mean(chain_b(:,i));
+    var_a = var(chain_a(:,i)) / n_a;
+    var_b = var(chain_b(:,i)) / n_b;
+    denom = sqrt(var_a + var_b);
+    if denom < 1e-20
+        z_score = 0;
+    else
+        z_score = (mu_a - mu_b) / denom;
+    end
+    if abs(z_score) < 2.0
+        g_flag = '[收敛]';
+    else
+        g_flag = '[未收敛]';
+        geweke_pass = false;
+    end
+    fprintf('  %-15s Z = %7.3f  %s\n', param_names{i}, z_score, g_flag);
+end
+if geweke_pass
+    fprintf('Geweke 诊断结论: 所有参数链均已收敛\n\n');
+else
+    fprintf('Geweke 诊断结论: 存在未收敛参数，建议增加采样步数\n\n');
+end
+ok_geweke = geweke_pass;
+
+% --- 4. 有效样本量 (ESS) ---
+fprintf('--- 4. 有效样本量 (ESS) ---\n');
+fprintf('（ESS < 100 表示链混合不足）\n');
+max_lag  = min(500, floor(n_post / 2));
+ess_vals = zeros(1, n_params);
+for i = 1:n_params
+    x   = chain_post(:, i) - mean(chain_post(:, i));
+    c0  = sum(x .^ 2);
+    acf_sum = 1.0;
+    for lag = 1:max_lag
+        rho = sum(x(1:end-lag) .* x(1+lag:end)) / c0;
+        if rho < 0.05
+            break;
+        end
+        acf_sum = acf_sum + 2 * rho;
+    end
+    ess_vals(i) = n_post / acf_sum;
+end
+ess_min = min(ess_vals);
+for i = 1:n_params
+    if ess_vals(i) >= 100
+        e_flag = '[良好]';
+    else
+        e_flag = '[不足]';
+    end
+    fprintf('  %-15s ESS = %-8.1f  %s\n', param_names{i}, ess_vals(i), e_flag);
+end
+fprintf('最小 ESS = %.1f  (后验链长 = %d)\n\n', ess_min, n_post);
+ok_ess = (ess_min >= 100);
+
+% --- 5. 综合判断 ---
+fprintf('--- 5. 综合判断 ---\n');
+all_pass = ok_accept && ok_coverage && ok_geweke && ok_ess;
+if all_pass
+    fprintf('MCMC 算法正确性验证: 全部通过\n');
+else
+    fprintf('MCMC 算法正确性验证: 存在以下问题\n');
+    if ~ok_accept
+        fprintf('  [FAIL] 接受率 %.3f 不在目标区间 [0.18, 0.35]\n', results.accept_rate);
+    end
+    if ~ok_coverage
+        fprintf('  [FAIL] 真值覆盖率偏低 (%.1f%% < 80%%)\n', coverage_rate);
+    end
+    if ~ok_geweke
+        fprintf('  [FAIL] 部分参数 Geweke Z 分数超出 [-2, 2]\n');
+    end
+    if ~ok_ess
+        fprintf('  [FAIL] 最小有效样本量不足 (ESS_min = %.1f < 100)\n', ess_min);
+    end
+end
+fprintf('==========================================\n\n');
+
 plot_results(results, theta_true, lb, ub, param_names);
 
 %  燃气绝热指数
