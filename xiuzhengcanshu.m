@@ -106,7 +106,7 @@ fprintf('\n');
 
 opts.n_samples = 30000;  % 总采样步数（增大以提升有效样本量）
 opts.burn_in = 6000;   % 烧入期步数（延长以充分自适应）
-opts.proposal_sd = 0.06;  % 标准差（13维z空间，0.06可使接受率落在目标区间）
+opts.proposal_sd = 0.15;  % 标准差（13维z空间，0.15可使烧入后接受率落在目标区间）
 opts.adapt_start = 0;    % 开始
 opts.adapt_end = 6000;   % 结束（与烧入期对齐，整个烧入期持续自适应）
 opts.adapt_interval = 100;    % 自适应调整间隔
@@ -123,7 +123,8 @@ fprintf('\n');
 %% 运行 MCMC
 results = run_mcmc(data, cond, lb, ub, theta0, opts);
 fprintf('后验结果：\n');
-fprintf('总体接受率: %.3f\n\n', results.accept_rate);
+fprintf('总体接受率(含烧入期): %.3f\n', results.accept_rate);
+fprintf('烧入后接受率:         %.3f\n\n', results.accept_rate_post);
 
 fprintf('%-10s  %8s  %8s  %8s  %8s  %8s  %8s\n', ...
     '参数名', '真值', 'Post均值', 'MAP', 'CI95低', 'CI95高', '先验中点');
@@ -172,15 +173,16 @@ fprintf('========== MCMC 算法正确性验证 ==========\n\n');
 chain_post = results.chain_post;
 n_post     = size(chain_post, 1);
 
-% --- 1. 接受率检验 ---
+% --- 1. 接受率检验（使用烧入后接受率，排除自适应阶段的干扰）---
 fprintf('--- 1. 接受率检验 ---\n');
-if results.accept_rate >= 0.18 && results.accept_rate <= 0.35
+fprintf('总体接受率(含烧入期): %.3f\n', results.accept_rate);
+if results.accept_rate_post >= 0.18 && results.accept_rate_post <= 0.35
     accept_status = '正常 [目标区间 0.18~0.35]';
 else
     accept_status = '异常，建议调整提案标准差';
 end
-fprintf('总体接受率: %.3f  -> %s\n\n', results.accept_rate, accept_status);
-ok_accept = (results.accept_rate >= 0.18 && results.accept_rate <= 0.35);
+fprintf('烧入后接受率:         %.3f  -> %s\n\n', results.accept_rate_post, accept_status);
+ok_accept = (results.accept_rate_post >= 0.18 && results.accept_rate_post <= 0.35);
 
 % --- 2. 真值95%置信区间覆盖率验证 ---
 fprintf('--- 2. 真值 95%% 置信区间覆盖率验证 ---\n');
@@ -275,7 +277,7 @@ if all_pass
 else
     fprintf('MCMC 算法正确性验证: 存在以下问题\n');
     if ~ok_accept
-        fprintf('  [FAIL] 接受率 %.3f 不在目标区间 [0.18, 0.35]\n', results.accept_rate);
+        fprintf('  [FAIL] 烧入后接受率 %.3f 不在目标区间 [0.18, 0.35]\n', results.accept_rate_post);
     end
     if ~ok_coverage
         fprintf('  [FAIL] 真值覆盖率偏低 (%.1f%% < 80%%)\n', coverage_rate);
@@ -597,6 +599,7 @@ if ~isfinite(lpost_curr)
 end
 
 n_accept_total = 0;
+n_accept_post  = 0;   % 仅统计烧入后的接受次数
 n_accept_window = 0;
 
 for s = 1:n_samples
@@ -611,8 +614,11 @@ for s = 1:n_samples
         z_curr = z_prop;
         theta_curr = theta_prop;
         lpost_curr = lpost_prop;
-        n_accept_total = n_accept_total  + 1;
+        n_accept_total  = n_accept_total  + 1;
         n_accept_window = n_accept_window + 1;
+        if s > burn_in
+            n_accept_post = n_accept_post + 1;
+        end
     end
 
     
@@ -653,7 +659,8 @@ results.chain_full = chain_full;
 results.chain_post = chain_post;
 results.logpost_full = logpost_full;
 results.logpost_post = logpost_post;
-results.accept_rate = n_accept_total / n_samples;
+results.accept_rate      = n_accept_total / n_samples;
+results.accept_rate_post = n_accept_post  / (n_samples - burn_in);  % 烧入后接受率
 results.theta_mean = theta_mean;
 results.theta_std = theta_std;
 results.theta_map = theta_map;
